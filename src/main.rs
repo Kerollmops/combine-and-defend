@@ -4,12 +4,16 @@ use std::time::Duration;
 use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
+use ordered_float::OrderedFloat;
 use rand::prelude::*;
 
 const ASTEROID_SPAWN_RADIUS_DISTANCE: f32 = 800.0;
 const ASTEROID_RADIUS: f32 = 10.0;
 const ASTEROID_SPEED: f32 = 1200.0; // by second
-const ASTEROID_SPAWN_TIME: u64 = 10; // in second
+const ASTEROID_SPAWN_TIME: u64 = 1; // in second
+
+const SHIP_SPEED: f32 = 2400.0; // by second
+const SHIP_TRIGGER_MAX_DISTANCE: f32 = 400.0;
 
 fn main() {
     let mut app = App::new();
@@ -26,8 +30,11 @@ fn main() {
     app.add_startup_system(setup_graphics)
         .add_startup_system(setup_planet)
         .add_startup_system(setup_asteroid_spawning)
+        .add_startup_system(setup_ships)
         .add_system(spawn_asteroids)
         .add_system(move_asteroids)
+        .add_system(setup_ships_target_lock)
+        .add_system(move_ships)
         .run();
 }
 
@@ -55,6 +62,25 @@ fn setup_asteroid_spawning(mut commands: Commands) {
         // create the repeating timer
         timer: Timer::new(Duration::from_secs(ASTEROID_SPAWN_TIME), true),
     })
+}
+
+/// Spawn one simple ship
+fn setup_ships(mut commands: Commands) {
+    let x = 100.0;
+    let y = 100.0;
+
+    let a = Vec2::new(0.0, 10.0);
+    let b = Vec2::new(-5.0, 0.0);
+    let c = Vec2::new(5.0, 0.0);
+
+    commands
+        .spawn_bundle(TransformBundle::from(Transform::from_xyz(x, y, 0.0)))
+        .insert(Ship)
+        .insert(ShipTarget(None))
+        .insert(RigidBody::Dynamic)
+        .insert(Collider::triangle(a, b, c))
+        .insert(Velocity::default())
+        .insert(Sleeping::disabled());
 }
 
 fn spawn_asteroids(
@@ -97,6 +123,42 @@ fn move_asteroids(
     }
 }
 
+fn setup_ships_target_lock(
+    asteroids: Query<(Entity, &Transform), With<Asteroid>>,
+    mut ships: Query<(&Transform, &mut ShipTarget), With<Ship>>,
+) {
+    if !asteroids.is_empty() {
+        for (ship_transform, mut ship_target) in &mut ships {
+            if ship_target.0.map_or(true, |e| asteroids.get(e).is_err()) {
+                let nearest = asteroids.iter().min_by_key(|(_, transform)| {
+                    OrderedFloat(transform.translation.distance_squared(ship_transform.translation))
+                });
+
+                if let Some((entity, transform)) = nearest {
+                    let distance = transform.translation.distance(ship_transform.translation);
+                    if distance <= SHIP_TRIGGER_MAX_DISTANCE {
+                        ship_target.0 = Some(entity);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn move_ships(
+    time: Res<Time>,
+    asteroids: Query<&Transform, With<Asteroid>>,
+    mut ships: Query<(&Transform, &mut Velocity, &ShipTarget), With<Ship>>,
+) {
+    for (ship_transform, mut ship_velocity, ship_target) in &mut ships {
+        if let Some(Ok(transform)) = ship_target.0.map(|e| asteroids.get(e)) {
+            let diff = transform.translation - ship_transform.translation;
+            let direction = diff.normalize_or_zero();
+            ship_velocity.linvel = direction.xy() * SHIP_SPEED * time.delta_seconds();
+        }
+    }
+}
+
 #[derive(Component, Debug)]
 struct Asteroid;
 
@@ -107,3 +169,9 @@ struct AsteroidSpawnConfig {
 
 #[derive(Component, Debug)]
 struct Planet;
+
+#[derive(Component, Debug)]
+struct Ship;
+
+#[derive(Component, Debug)]
+struct ShipTarget(Option<Entity>);
