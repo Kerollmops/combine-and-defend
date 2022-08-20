@@ -4,6 +4,9 @@ use std::time::Duration;
 use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy::render::camera::RenderTarget;
+use bevy::render::mesh::Indices;
+use bevy::render::render_resource::PrimitiveTopology;
+use bevy::sprite::MaterialMesh2dBundle;
 use bevy_asset_loader::prelude::*;
 use bevy_rapier2d::prelude::*;
 use bevy_tweening::lens::TransformRotateZLens;
@@ -52,21 +55,26 @@ fn main() {
 }
 
 fn setup_graphics(mut commands: Commands) {
-    commands
-        .spawn_bundle(Camera2dBundle {
-            transform: Transform::from_xyz(0.0, 20.0, 0.0),
-            ..default()
-        })
-        .insert(SpaceCamera);
+    commands.spawn_bundle(Camera2dBundle::default()).insert(SpaceCamera);
 }
 
 /// Configure the main planet to defend
-fn setup_planet(mut commands: Commands) {
+fn setup_planet(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     // Planet Earth
     let planet_radius = 50.0;
 
     commands
-        .spawn_bundle(TransformBundle::from(Transform::default()))
+        .spawn_bundle(MaterialMesh2dBundle {
+            mesh: meshes
+                .add(Mesh::from(shape::Icosphere { radius: planet_radius, subdivisions: 30 }))
+                .into(),
+            material: materials.add(ColorMaterial::from(Color::rgb(0.302, 0.302, 1.0))),
+            ..default()
+        })
         .insert(Planet)
         .insert(Collider::ball(planet_radius))
         .insert(ActiveEvents::COLLISION_EVENTS);
@@ -80,17 +88,41 @@ fn setup_asteroid_spawning(mut commands: Commands) {
     })
 }
 
-/// Spawn one simple ship
-fn setup_ships(mut commands: Commands) {
+fn create_triangle(a: Vec2, b: Vec2, c: Vec2) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vec![a.extend(0.0).to_array(), b.extend(0.0).to_array(), c.extend(0.0).to_array()],
+    );
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_NORMAL,
+        vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[1.0, 1.0], [1.0, 1.0], [1.0, 1.0]]);
+    mesh.set_indices(Some(Indices::U32(vec![0, 2, 1, 0, 3, 2])));
+    mesh
+}
+
+/// Spawn two basic ships
+fn setup_ships(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     let x = 100.0;
     let y = 100.0;
 
-    let a = Vec2::new(0.0, 10.0);
-    let b = Vec2::new(-5.0, 0.0);
-    let c = Vec2::new(5.0, 0.0);
+    let a = Vec2::new(-0.5, 0.0);
+    let b = Vec2::new(0.0, 1.0);
+    let c = Vec2::new(0.5, 0.0);
 
     commands
-        .spawn_bundle(TransformBundle::from(Transform::from_xyz(x, y, 0.0)))
+        .spawn_bundle(MaterialMesh2dBundle {
+            mesh: meshes.add(create_triangle(a, b, c)).into(),
+            transform: Transform::from_xyz(x, y, 0.0).with_scale(Vec3::splat(10.)),
+            material: materials.add(ColorMaterial::from(Color::PURPLE)),
+            ..default()
+        })
         .insert(Ship)
         .insert(ContactBumpPower)
         .insert(ShipTarget(None))
@@ -102,12 +134,13 @@ fn setup_ships(mut commands: Commands) {
     let x = 100.0;
     let y = -100.0;
 
-    let a = Vec2::new(0.0, 10.0);
-    let b = Vec2::new(-5.0, 0.0);
-    let c = Vec2::new(5.0, 0.0);
-
     commands
-        .spawn_bundle(TransformBundle::from(Transform::from_xyz(x, y, 0.0)))
+        .spawn_bundle(MaterialMesh2dBundle {
+            mesh: meshes.add(create_triangle(a, b, c)).into(),
+            transform: Transform::from_xyz(x, y, 0.0).with_scale(Vec3::splat(10.)),
+            material: materials.add(ColorMaterial::from(Color::PURPLE)),
+            ..default()
+        })
         .insert(Ship)
         .insert(ContactDestroyPower)
         .insert(ShipTarget(None))
@@ -122,6 +155,8 @@ fn spawn_asteroids(
     time: Res<Time>,
     planet: Query<&Transform, With<Planet>>,
     mut config: ResMut<AsteroidSpawnConfig>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     config.timer.tick(time.delta());
 
@@ -134,7 +169,14 @@ fn spawn_asteroids(
         let y = angle.sin() * ASTEROID_SPAWN_RADIUS_DISTANCE + planet_translation.y;
 
         commands
-            .spawn_bundle(TransformBundle::from(Transform::from_xyz(x, y, 0.0)))
+            .spawn_bundle(MaterialMesh2dBundle {
+                mesh: meshes
+                    .add(Mesh::from(shape::Icosphere { radius: ASTEROID_RADIUS, subdivisions: 30 }))
+                    .into(),
+                material: materials.add(ColorMaterial::from(Color::rgb(0.663, 0.663, 0.663))),
+                transform: Transform::from_xyz(x, y, 0.0),
+                ..default()
+            })
             .insert(Asteroid)
             .insert(RigidBody::Dynamic)
             .insert(Collider::ball(ASTEROID_RADIUS))
