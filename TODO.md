@@ -1,3 +1,6 @@
-## Power Ups for ships
+## Powers for ships
  - Bumping shoots (when touching surface bumps the asteroid)
- - Freezing shoots
+ - Freezing shoots or contact
+
+## Improvements
+ - use ray-casting to avoid bumping the planet when targeting asteroids
