@@ -28,11 +28,12 @@ const ASTERIOD_COLORS: [Color; 5] = [
     Color::rgb(0.231, 0.318, 0.369),
 ];
 
-const SHIP_SPEED: f32 = 2400.0; // by second
 const SHIP_TRIGGER_MAX_DISTANCE: f32 = 400.0;
 const SHIP_BUMP_FORCE: f32 = 4.0;
 const SHIP_MAX_DISTANCE_FROM_PLANET_INTEREST: f32 = 500.0;
 const SHIP_PLANET_SIGHT: f32 = 100.0;
+const SHIP_CONTROL_INTERVAL: Duration = Duration::from_millis(250);
+const SHIP_CONTROL_IMPULSE_VELOCITY: f32 = 0.08;
 
 fn main() {
     let mut app = App::new();
@@ -146,13 +147,13 @@ fn setup_ships(
             material: materials.add(ColorMaterial::from(Color::PURPLE)),
             ..default()
         })
-        .insert(Ship)
+        .insert(Ship { control_timer: Timer::new(SHIP_CONTROL_INTERVAL, true) })
         .insert(ContactBumpPower)
         .insert(ShipTarget(None))
         .insert(RigidBody::Dynamic)
         .insert(Collider::triangle(a, b, c))
         .insert(ActiveEvents::COLLISION_EVENTS)
-        .insert(Velocity::default());
+        .insert(ExternalImpulse::default());
 
     let x = 100.0;
     let y = -100.0;
@@ -164,13 +165,13 @@ fn setup_ships(
             material: materials.add(ColorMaterial::from(Color::PURPLE)),
             ..default()
         })
-        .insert(Ship)
+        .insert(Ship { control_timer: Timer::new(SHIP_CONTROL_INTERVAL, true) })
         .insert(ContactDestroyPower)
         .insert(ShipTarget(None))
         .insert(RigidBody::Dynamic)
         .insert(Collider::triangle(a, b, c))
         .insert(ActiveEvents::COLLISION_EVENTS)
-        .insert(Velocity::default());
+        .insert(ExternalImpulse::default());
 }
 
 fn spawn_asteroids(
@@ -365,24 +366,31 @@ fn move_ships(
     time: Res<Time>,
     planet: Query<&Transform, With<Planet>>,
     asteroids: Query<&Transform, With<Asteroid>>,
-    mut ships: Query<(&Transform, &mut Velocity, &ShipTarget), With<Ship>>,
+    mut ships: Query<(&Transform, &mut ExternalImpulse, &ShipTarget, &mut Ship)>,
 ) {
-    for (ship_transform, mut ship_velocity, ship_target) in &mut ships {
-        match ship_target.0.map(|e| asteroids.get(e)) {
-            Some(Ok(transform)) => {
-                let diff = transform.translation - ship_transform.translation;
-                let direction = diff.normalize_or_zero();
-                ship_velocity.linvel = direction.xy() * SHIP_SPEED * time.delta_seconds();
-            }
-            _otherwise => {
-                let planet_transform = planet.single();
-                let distance = planet_transform.translation.distance(ship_transform.translation);
-                if distance >= SHIP_PLANET_SIGHT {
-                    let diff = planet_transform.translation - ship_transform.translation;
+    for (ship_transform, mut ext_impulse, ship_target, mut ship) in &mut ships {
+        // timers gotta be ticked, to work
+        ship.control_timer.tick(time.delta());
+
+        // if it finished, despawn the bomb
+        if ship.control_timer.finished() {
+            // we can send an impulsion toward our target
+
+            match ship_target.0.map(|e| asteroids.get(e)) {
+                Some(Ok(transform)) => {
+                    let diff = transform.translation - ship_transform.translation;
                     let direction = diff.normalize_or_zero();
-                    ship_velocity.linvel = direction.xy() * SHIP_SPEED * time.delta_seconds();
-                } else {
-                    ship_velocity.linvel = Vec2::ZERO;
+                    ext_impulse.impulse = direction.xy() * SHIP_CONTROL_IMPULSE_VELOCITY;
+                }
+                _otherwise => {
+                    let planet_transform = planet.single();
+                    let distance =
+                        planet_transform.translation.distance(ship_transform.translation);
+                    if distance >= SHIP_PLANET_SIGHT {
+                        let diff = planet_transform.translation - ship_transform.translation;
+                        let direction = diff.normalize_or_zero();
+                        ext_impulse.impulse = direction.xy() * SHIP_CONTROL_IMPULSE_VELOCITY;
+                    }
                 }
             }
         }
@@ -543,7 +551,10 @@ struct AsteroidSpawnConfig {
 struct Planet;
 
 #[derive(Component, Debug)]
-struct Ship;
+struct Ship {
+    /// How often to control a ship (repeating timer)
+    control_timer: Timer,
+}
 
 #[derive(Component, Debug)]
 struct ContactBumpPower;
