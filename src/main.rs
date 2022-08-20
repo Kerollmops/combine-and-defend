@@ -18,7 +18,7 @@ use rand::prelude::*;
 
 const ASTEROID_SPAWN_RADIUS_DISTANCE: f32 = 800.0;
 const ASTEROID_RADIUS: f32 = 10.0;
-const ASTEROID_SPEED: f32 = 1200.0; // by second
+const ASTEROID_SPEED: f32 = 1.0; // by second
 const ASTEROID_SPAWN_TIME: u64 = 1; // in second
 const ASTERIOD_COLORS: [Color; 5] = [
     Color::rgb(0.663, 0.663, 0.663),
@@ -30,7 +30,7 @@ const ASTERIOD_COLORS: [Color; 5] = [
 
 const SHIP_SPEED: f32 = 2400.0; // by second
 const SHIP_TRIGGER_MAX_DISTANCE: f32 = 400.0;
-const SHIP_BUMP_FORCE: f32 = 400.0;
+const SHIP_BUMP_FORCE: f32 = 4.0;
 const SHIP_MAX_DISTANCE_FROM_PLANET_INTEREST: f32 = 500.0;
 const SHIP_PLANET_SIGHT: f32 = 100.0;
 
@@ -57,7 +57,6 @@ fn main() {
         .add_startup_system(setup_asteroid_spawning)
         .add_startup_system(setup_ships)
         .add_system(spawn_asteroids)
-        .add_system(move_asteroids)
         .add_system(setup_ships_target_lock)
         .add_system(move_ships)
         .add_system(despawn_asteroids_on_planet_collision)
@@ -192,7 +191,11 @@ fn spawn_asteroids(
         let angle = rng.gen::<f32>() * PI * 2.0;
         let x = angle.cos() * ASTEROID_SPAWN_RADIUS_DISTANCE + planet_translation.x;
         let y = angle.sin() * ASTEROID_SPAWN_RADIUS_DISTANCE + planet_translation.y;
+        let translation = Vec3::new(x, y, 0.0);
         let color = ASTERIOD_COLORS.choose(&mut rng).unwrap().clone();
+
+        let diff = planet_translation - translation;
+        let direction = diff.normalize_or_zero().xy();
 
         commands
             .spawn_bundle(MaterialMesh2dBundle {
@@ -200,29 +203,15 @@ fn spawn_asteroids(
                     .add(Mesh::from(shape::Icosphere { radius: ASTEROID_RADIUS, subdivisions: 30 }))
                     .into(),
                 material: materials.add(ColorMaterial::from(color)),
-                transform: Transform::from_xyz(x, y, 0.0),
+                transform: Transform::from_translation(translation),
                 ..default()
             })
             .insert(Asteroid)
             .insert(RigidBody::Dynamic)
+            .insert(ExternalImpulse { impulse: direction * ASTEROID_SPEED, torque_impulse: 0.0 })
             .insert(Collider::ball(ASTEROID_RADIUS))
             .insert(ActiveEvents::COLLISION_EVENTS)
-            .insert(Velocity::default())
-            .insert(ExternalForce::default());
-    }
-}
-
-fn move_asteroids(
-    time: Res<Time>,
-    planet: Query<&Transform, With<Planet>>,
-    mut asteroids: Query<(&Transform, &mut Velocity), With<Asteroid>>,
-) {
-    let planet_transform = planet.single();
-
-    for (transform, mut velocity) in &mut asteroids {
-        let diff = planet_transform.translation - transform.translation;
-        let direction = diff.normalize_or_zero();
-        velocity.linvel = direction.xy() * ASTEROID_SPEED * time.delta_seconds();
+            .insert(Sleeping::disabled());
     }
 }
 
@@ -262,7 +251,7 @@ fn remove_dice_from_bag_on_planet_collision(
 
 fn bump_asteroids_on_ship_collision_with_bump_power(
     mut ships: Query<&Transform, (With<Ship>, With<ContactBumpPower>)>,
-    mut asteroids: Query<(&Transform, &mut ExternalForce), With<Asteroid>>,
+    mut asteroids: Query<(&Transform, &mut ExternalImpulse), With<Asteroid>>,
     mut collision_events: EventReader<CollisionEvent>,
 ) {
     for event in collision_events.iter() {
@@ -279,11 +268,11 @@ fn bump_asteroids_on_ship_collision_with_bump_power(
                 None
             };
 
-            if let Some((ship_transform, (transform, mut ext_force))) = components {
+            if let Some((ship_transform, (transform, mut ext_impl))) = components {
                 let diff = transform.translation - ship_transform.translation;
                 let direction = diff.normalize_or_zero();
-                ext_force.force = direction.xy() * SHIP_BUMP_FORCE;
-                ext_force.torque = 0.01;
+                ext_impl.impulse = direction.xy() * SHIP_BUMP_FORCE;
+                ext_impl.torque_impulse = 0.001;
             }
         }
     }
