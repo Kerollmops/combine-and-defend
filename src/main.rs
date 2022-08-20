@@ -18,6 +18,8 @@ const ASTEROID_SPAWN_TIME: u64 = 1; // in second
 const SHIP_SPEED: f32 = 2400.0; // by second
 const SHIP_TRIGGER_MAX_DISTANCE: f32 = 400.0;
 const SHIP_BUMP_FORCE: f32 = 400.0;
+const SHIP_MAX_DISTANCE_FROM_PLANET_INTEREST: f32 = 500.0;
+const SHIP_PLANET_SIGHT: f32 = 100.0;
 
 fn main() {
     let mut app = App::new();
@@ -243,20 +245,38 @@ fn destroy_asteroids_on_ship_collision_with_destroy_power(
 }
 
 fn setup_ships_target_lock(
+    planet: Query<&Transform, With<Planet>>,
     asteroids: Query<(Entity, &Transform), With<Asteroid>>,
     mut ships: Query<(&Transform, &mut ShipTarget), With<Ship>>,
 ) {
     if !asteroids.is_empty() {
-        for (ship_transform, mut ship_target) in &mut ships {
-            if ship_target.0.map_or(true, |e| asteroids.get(e).is_err()) {
-                let nearest = asteroids.iter().min_by_key(|(_, transform)| {
-                    OrderedFloat(transform.translation.distance_squared(ship_transform.translation))
-                });
+        let planet_transform = planet.single();
 
-                if let Some((entity, transform)) = nearest {
-                    let distance = transform.translation.distance(ship_transform.translation);
-                    if distance <= SHIP_TRIGGER_MAX_DISTANCE {
-                        ship_target.0 = Some(entity);
+        for (ship_transform, mut ship_target) in &mut ships {
+            match ship_target.0.map(|e| asteroids.get(e)) {
+                Some(Ok((_entity, transform))) => {
+                    let planet_distance =
+                        planet_transform.translation.distance(transform.translation);
+                    if planet_distance > SHIP_MAX_DISTANCE_FROM_PLANET_INTEREST {
+                        ship_target.0 = None;
+                    }
+                }
+                _otherwise => {
+                    let nearest = asteroids.iter().min_by_key(|(_, transform)| {
+                        OrderedFloat(
+                            transform.translation.distance_squared(ship_transform.translation),
+                        )
+                    });
+
+                    if let Some((entity, transform)) = nearest {
+                        let distance = transform.translation.distance(ship_transform.translation);
+                        let planet_distance =
+                            planet_transform.translation.distance(transform.translation);
+                        if distance <= SHIP_TRIGGER_MAX_DISTANCE
+                            && planet_distance <= SHIP_MAX_DISTANCE_FROM_PLANET_INTEREST
+                        {
+                            ship_target.0 = Some(entity);
+                        }
                     }
                 }
             }
@@ -264,16 +284,32 @@ fn setup_ships_target_lock(
     }
 }
 
+/// Move the ships to collide with the targeted asteroids and
+/// toward the planet when there is no target.
 fn move_ships(
     time: Res<Time>,
+    planet: Query<&Transform, With<Planet>>,
     asteroids: Query<&Transform, With<Asteroid>>,
     mut ships: Query<(&Transform, &mut Velocity, &ShipTarget), With<Ship>>,
 ) {
     for (ship_transform, mut ship_velocity, ship_target) in &mut ships {
-        if let Some(Ok(transform)) = ship_target.0.map(|e| asteroids.get(e)) {
-            let diff = transform.translation - ship_transform.translation;
-            let direction = diff.normalize_or_zero();
-            ship_velocity.linvel = direction.xy() * SHIP_SPEED * time.delta_seconds();
+        match ship_target.0.map(|e| asteroids.get(e)) {
+            Some(Ok(transform)) => {
+                let diff = transform.translation - ship_transform.translation;
+                let direction = diff.normalize_or_zero();
+                ship_velocity.linvel = direction.xy() * SHIP_SPEED * time.delta_seconds();
+            }
+            _otherwise => {
+                let planet_transform = planet.single();
+                let distance = planet_transform.translation.distance(ship_transform.translation);
+                if distance >= SHIP_PLANET_SIGHT {
+                    let diff = planet_transform.translation - ship_transform.translation;
+                    let direction = diff.normalize_or_zero();
+                    ship_velocity.linvel = direction.xy() * SHIP_SPEED * time.delta_seconds();
+                } else {
+                    ship_velocity.linvel = Vec2::ZERO;
+                }
+            }
         }
     }
 }
