@@ -93,8 +93,7 @@ fn setup_ships(mut commands: Commands) {
         .insert(RigidBody::Dynamic)
         .insert(Collider::triangle(a, b, c))
         .insert(ActiveEvents::COLLISION_EVENTS)
-        .insert(Velocity::default())
-        .insert(Sleeping::disabled());
+        .insert(Velocity::default());
 
     let x = 100.0;
     let y = -100.0;
@@ -111,8 +110,7 @@ fn setup_ships(mut commands: Commands) {
         .insert(RigidBody::Dynamic)
         .insert(Collider::triangle(a, b, c))
         .insert(ActiveEvents::COLLISION_EVENTS)
-        .insert(Velocity::default())
-        .insert(Sleeping::disabled());
+        .insert(Velocity::default());
 }
 
 fn spawn_asteroids(
@@ -138,8 +136,7 @@ fn spawn_asteroids(
             .insert(Collider::ball(ASTEROID_RADIUS))
             .insert(ActiveEvents::COLLISION_EVENTS)
             .insert(Velocity::default())
-            .insert(ExternalForce::default())
-            .insert(Sleeping::disabled());
+            .insert(ExternalForce::default());
     }
 }
 
