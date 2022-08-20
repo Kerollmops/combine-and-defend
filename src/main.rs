@@ -5,6 +5,8 @@ use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_rapier2d::prelude::*;
+use bevy_tweening::lens::TransformRotateZLens;
+use bevy_tweening::*;
 use ordered_float::OrderedFloat;
 use rand::prelude::*;
 
@@ -21,6 +23,7 @@ fn main() {
     let mut app = App::new();
 
     app.add_plugins(DefaultPlugins)
+        .add_plugin(TweeningPlugin)
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa::default())
         .init_collection::<ImageAssets>()
@@ -227,7 +230,13 @@ fn destroy_asteroids_on_ship_collision_with_destroy_power(
                         texture: image_assets.handle_for_dice_number(dice_number).clone(),
                         ..default()
                     })
-                    .insert(DiceLoot { number: dice_number });
+                    .insert(DiceLoot { number: dice_number })
+                    .insert(Animator::new(Tween::new(
+                        EaseFunction::QuadraticInOut,
+                        TweeningType::PingPong,
+                        Duration::from_millis(150),
+                        TransformRotateZLens { start: 0.0, end: PI / 6.0 },
+                    )));
             }
         }
     }
