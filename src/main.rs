@@ -20,6 +20,13 @@ const ASTEROID_SPAWN_RADIUS_DISTANCE: f32 = 800.0;
 const ASTEROID_RADIUS: f32 = 10.0;
 const ASTEROID_SPEED: f32 = 1200.0; // by second
 const ASTEROID_SPAWN_TIME: u64 = 1; // in second
+const ASTERIOD_COLORS: [Color; 5] = [
+    Color::rgb(0.663, 0.663, 0.663),
+    Color::rgb(0.502, 0.502, 0.502),
+    Color::rgb(0.424, 0.275, 0.0),
+    Color::rgb(0.325, 0.208, 0.0),
+    Color::rgb(0.231, 0.318, 0.369),
+];
 
 const SHIP_SPEED: f32 = 2400.0; // by second
 const SHIP_TRIGGER_MAX_DISTANCE: f32 = 400.0;
@@ -181,16 +188,18 @@ fn spawn_asteroids(
         let planet_transform = planet.single();
         let planet_translation = planet_transform.translation;
 
-        let angle = random::<f32>() * PI * 2.0;
+        let mut rng = thread_rng();
+        let angle = rng.gen::<f32>() * PI * 2.0;
         let x = angle.cos() * ASTEROID_SPAWN_RADIUS_DISTANCE + planet_translation.x;
         let y = angle.sin() * ASTEROID_SPAWN_RADIUS_DISTANCE + planet_translation.y;
+        let color = ASTERIOD_COLORS.choose(&mut rng).unwrap().clone();
 
         commands
             .spawn_bundle(MaterialMesh2dBundle {
                 mesh: meshes
                     .add(Mesh::from(shape::Icosphere { radius: ASTEROID_RADIUS, subdivisions: 30 }))
                     .into(),
-                material: materials.add(ColorMaterial::from(Color::rgb(0.663, 0.663, 0.663))),
+                material: materials.add(ColorMaterial::from(color)),
                 transform: Transform::from_xyz(x, y, 0.0),
                 ..default()
             })
