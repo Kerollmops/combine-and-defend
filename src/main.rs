@@ -1,3 +1,5 @@
+use std::array;
+use std::collections::vec_deque::{self, VecDeque};
 use std::f32::consts::PI;
 use std::time::Duration;
 
@@ -32,6 +34,8 @@ fn main() {
         .add_plugin(TweeningPlugin)
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa::default())
+        .insert_resource(DiceBag::default())
+        .add_event::<DiceOwnedEvent>()
         .init_collection::<ImageAssets>()
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
         .insert_resource(RapierConfiguration { gravity: Vec2::ZERO, ..default() });
@@ -41,6 +45,7 @@ fn main() {
 
     app.add_startup_system(setup_graphics)
         .add_startup_system(setup_planet)
+        // .add_startup_system(setup_debug)
         .add_startup_system(setup_asteroid_spawning)
         .add_startup_system(setup_ships)
         .add_system(spawn_asteroids)
@@ -51,6 +56,8 @@ fn main() {
         .add_system(bump_asteroids_on_ship_collision_with_bump_power)
         .add_system(destroy_asteroids_on_ship_collision_with_destroy_power)
         .add_system(collect_dices_by_mouse_clicking)
+        .add_system(manage_newly_owned_dice)
+        .add_system(draw_dice_bag)
         .run();
 }
 
@@ -78,6 +85,14 @@ fn setup_planet(
         .insert(Planet)
         .insert(Collider::ball(planet_radius))
         .insert(ActiveEvents::COLLISION_EVENTS);
+}
+
+#[allow(unused)]
+fn setup_debug(mut dice_writer: EventWriter<DiceOwnedEvent>) {
+    let mut rng = thread_rng();
+    for _ in 0..rng.gen_range(2..5) {
+        dice_writer.send(DiceOwnedEvent(DiceNumber::from_rng(&mut rng)));
+    }
 }
 
 /// Configure our asteroid spawning algorithm
@@ -359,9 +374,10 @@ fn move_ships(
 
 fn collect_dices_by_mouse_clicking(
     mut commands: Commands,
+    mut dice_owned: EventWriter<DiceOwnedEvent>,
     wnds: Res<Windows>,
     camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
-    dices: Query<(Entity, &Sprite, &GlobalTransform), With<DiceLoot>>,
+    dices: Query<(Entity, &Sprite, &GlobalTransform, &DiceLoot), With<DiceLoot>>,
     buttons: Res<Input<MouseButton>>,
 ) {
     if buttons.just_pressed(MouseButton::Left) {
@@ -386,7 +402,7 @@ fn collect_dices_by_mouse_clicking(
             // reduce it to a 2D value
             let world_pos: Vec2 = world_pos.truncate();
 
-            for (entity, sprite, transform) in &dices {
+            for (entity, sprite, transform, dice_loot) in &dices {
                 if let Some(size) = sprite.custom_size {
                     let translation = transform.translation().xy();
                     let p = world_pos;
@@ -397,11 +413,94 @@ fn collect_dices_by_mouse_clicking(
                     let b_bottom = translation.y + size.y;
 
                     if (p.x >= b_left && p.x <= b_right) && (p.y >= b_top && p.y <= b_bottom) {
+                        dice_owned.send(DiceOwnedEvent(dice_loot.number));
                         commands.entity(entity).despawn();
                     }
                 }
             }
         }
+    }
+}
+
+fn manage_newly_owned_dice(
+    mut dice_owned: EventReader<DiceOwnedEvent>,
+    mut dice_bag: ResMut<DiceBag>,
+) {
+    for DiceOwnedEvent(number) in dice_owned.iter() {
+        dice_bag.push(*number);
+    }
+}
+
+fn draw_dice_bag(
+    mut commands: Commands,
+    dice_bag: Res<DiceBag>,
+    mut dice_bag_numbers: Query<Entity, With<DiceBagNumbers>>,
+    image_assets: Res<ImageAssets>,
+) {
+    // We clear the screen of the bag dice numbers list.
+    dice_bag_numbers.for_each_mut(|entity| commands.entity(entity).despawn_recursive());
+
+    commands
+        .spawn_bundle(NodeBundle {
+            style: Style {
+                size: Size::new(Val::Percent(100.0), Val::Percent(100.0)),
+                justify_content: JustifyContent::SpaceBetween,
+                ..default()
+            },
+            color: Color::NONE.into(),
+            ..default()
+        })
+        .insert(DiceBagNumbers)
+        .with_children(|parent| {
+            for (i, dice_number) in dice_bag.iter().enumerate() {
+                parent
+                    .spawn_bundle(NodeBundle {
+                        style: Style {
+                            size: Size::new(Val::Percent(100.0), Val::Percent(100.0)),
+                            position_type: PositionType::Absolute,
+                            position: UiRect {
+                                left: Val::Px(20.0),
+                                bottom: Val::Px(30.0 * i as f32 + 20.0),
+                                ..default()
+                            },
+                            justify_content: JustifyContent::FlexStart,
+                            align_items: AlignItems::FlexStart,
+                            ..default()
+                        },
+                        color: Color::NONE.into(),
+                        ..default()
+                    })
+                    .with_children(|parent| {
+                        parent.spawn_bundle(ImageBundle {
+                            style: Style { size: Size::new(Val::Px(25.0), Val::Auto), ..default() },
+                            image: image_assets.handle_for_dice_number(*dice_number).clone().into(),
+                            ..default()
+                        });
+                    });
+            }
+        });
+}
+
+#[derive(Debug, Default)]
+struct DiceBag {
+    bag: VecDeque<DiceNumber>,
+}
+
+impl DiceBag {
+    fn push(&mut self, dice: DiceNumber) {
+        self.bag.push_back(dice);
+    }
+
+    fn try_consume<const N: usize>(&mut self) -> Option<[DiceNumber; N]> {
+        if self.bag.len() >= N {
+            Some(array::from_fn(|_| self.bag.pop_front().unwrap()))
+        } else {
+            None
+        }
+    }
+
+    fn iter(&self) -> vec_deque::Iter<DiceNumber> {
+        self.bag.iter()
     }
 }
 
@@ -458,6 +557,12 @@ impl DiceNumber {
         }
     }
 }
+
+/// The list of dice numbers displayed on the left of the screen.
+#[derive(Component, Debug)]
+struct DiceBagNumbers;
+
+struct DiceOwnedEvent(DiceNumber);
 
 #[derive(AssetCollection)]
 struct ImageAssets {
