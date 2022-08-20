@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
+use bevy::render::camera::RenderTarget;
 use bevy_asset_loader::prelude::*;
 use bevy_rapier2d::prelude::*;
 use bevy_tweening::lens::TransformRotateZLens;
@@ -46,14 +47,17 @@ fn main() {
         .add_system(despawn_asteroids_on_planet_collision)
         .add_system(bump_asteroids_on_ship_collision_with_bump_power)
         .add_system(destroy_asteroids_on_ship_collision_with_destroy_power)
+        .add_system(collect_dices_by_mouse_clicking)
         .run();
 }
 
 fn setup_graphics(mut commands: Commands) {
-    commands.spawn_bundle(Camera2dBundle {
-        transform: Transform::from_xyz(0.0, 20.0, 0.0),
-        ..default()
-    });
+    commands
+        .spawn_bundle(Camera2dBundle {
+            transform: Transform::from_xyz(0.0, 20.0, 0.0),
+            ..default()
+        })
+        .insert(SpaceCamera);
 }
 
 /// Configure the main planet to defend
@@ -310,6 +314,57 @@ fn move_ships(
         }
     }
 }
+
+fn collect_dices_by_mouse_clicking(
+    mut commands: Commands,
+    wnds: Res<Windows>,
+    camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
+    dices: Query<(Entity, &Sprite, &GlobalTransform), With<DiceLoot>>,
+    buttons: Res<Input<MouseButton>>,
+) {
+    if buttons.just_pressed(MouseButton::Left) {
+        let (camera, camera_transform) = camera.single();
+        let wnd = if let RenderTarget::Window(id) = camera.target {
+            wnds.get(id).unwrap()
+        } else {
+            wnds.get_primary().unwrap()
+        };
+
+        // check if the cursor is inside the window and get its position
+        if let Some(screen_pos) = wnd.cursor_position() {
+            // get the size of the window
+            let window_size = Vec2::new(wnd.width() as f32, wnd.height() as f32);
+            // convert screen position [0..resolution] to ndc [-1..1] (gpu coordinates)
+            let ndc = (screen_pos / window_size) * 2.0 - Vec2::ONE;
+            // matrix for undoing the projection and camera transform
+            let ndc_to_world =
+                camera_transform.compute_matrix() * camera.projection_matrix().inverse();
+            // use it to convert ndc to world-space coordinates
+            let world_pos = ndc_to_world.project_point3(ndc.extend(-1.0));
+            // reduce it to a 2D value
+            let world_pos: Vec2 = world_pos.truncate();
+
+            for (entity, sprite, transform) in &dices {
+                if let Some(size) = sprite.custom_size {
+                    let translation = transform.translation().xy();
+                    let p = world_pos;
+
+                    let b_left = translation.x - size.x;
+                    let b_right = translation.x + size.x;
+                    let b_top = translation.y - size.y;
+                    let b_bottom = translation.y + size.y;
+
+                    if (p.x >= b_left && p.x <= b_right) && (p.y >= b_top && p.y <= b_bottom) {
+                        commands.entity(entity).despawn();
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Component, Debug)]
+struct SpaceCamera;
 
 #[derive(Component, Debug)]
 struct Asteroid;
