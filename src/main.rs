@@ -36,6 +36,7 @@ fn main() {
         .insert_resource(Msaa::default())
         .insert_resource(DiceBag::default())
         .add_event::<DiceOwnedEvent>()
+        .add_event::<DiceLostEvent>()
         .init_collection::<ImageAssets>()
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
         .insert_resource(RapierConfiguration { gravity: Vec2::ZERO, ..default() });
@@ -53,10 +54,11 @@ fn main() {
         .add_system(setup_ships_target_lock)
         .add_system(move_ships)
         .add_system(despawn_asteroids_on_planet_collision)
+        .add_system(remove_dice_from_bag_on_planet_collision)
         .add_system(bump_asteroids_on_ship_collision_with_bump_power)
         .add_system(destroy_asteroids_on_ship_collision_with_destroy_power)
         .add_system(collect_dices_by_mouse_clicking)
-        .add_system(manage_newly_owned_dice)
+        .add_system(manage_dice_events)
         .add_system(draw_dice_bag)
         .run();
 }
@@ -227,6 +229,23 @@ fn despawn_asteroids_on_planet_collision(
                 commands.entity(entity).despawn();
             } else if let (Ok(_), Ok(entity)) = (planet.get(*e2), asteroids.get(*e1)) {
                 commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+fn remove_dice_from_bag_on_planet_collision(
+    planet: Query<(), With<Planet>>,
+    asteroids: Query<(), With<Asteroid>>,
+    mut collision_events: EventReader<CollisionEvent>,
+    mut dice_lost: EventWriter<DiceLostEvent>,
+) {
+    for event in collision_events.iter() {
+        if let CollisionEvent::Started(e1, e2, _) = event {
+            if let (Ok(_), Ok(_)) = (planet.get(*e1), asteroids.get(*e2)) {
+                dice_lost.send(DiceLostEvent);
+            } else if let (Ok(_), Ok(_)) = (planet.get(*e2), asteroids.get(*e1)) {
+                dice_lost.send(DiceLostEvent);
             }
         }
     }
@@ -422,15 +441,22 @@ fn collect_dices_by_mouse_clicking(
     }
 }
 
-fn manage_newly_owned_dice(
+fn manage_dice_events(
+    mut dice_lost: EventReader<DiceLostEvent>,
     mut dice_owned: EventReader<DiceOwnedEvent>,
     mut dice_bag: ResMut<DiceBag>,
 ) {
+    for DiceLostEvent in dice_lost.iter() {
+        dice_bag.try_consume::<1>();
+    }
+
     for DiceOwnedEvent(number) in dice_owned.iter() {
         dice_bag.push(*number);
     }
 }
 
+// We need to rewrite this part and not clear and recreate the UI from scratch,
+// it makes it impossible to animate stuff and things...
 fn draw_dice_bag(
     mut commands: Commands,
     dice_bag: Res<DiceBag>,
@@ -563,6 +589,8 @@ impl DiceNumber {
 struct DiceBagNumbers;
 
 struct DiceOwnedEvent(DiceNumber);
+
+struct DiceLostEvent;
 
 #[derive(AssetCollection)]
 struct ImageAssets {
